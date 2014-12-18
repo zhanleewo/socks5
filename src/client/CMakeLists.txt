@@ -1,4 +1,4 @@
-PROJECT(Client C)
+PROJECT(Client CXX)
 
 SET(HEAD_LIST
 	../common/common.h)

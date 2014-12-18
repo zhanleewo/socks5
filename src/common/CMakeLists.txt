@@ -1,0 +1,21 @@
+PROJECT(Common CXX)
+
+SET(HEAD_LIST
+	list.h
+	ringbuffer.h
+	threadpool.h
+	common.h)
+
+SET(SRC_LIST
+	ringbuffer.c
+	threadpool.c
+	common.c)
+
+INCLUDE_DIRECTORIES(.)
+# LINK_DIRECTORIES()
+ADD_LIBRARY(Common STATIC ${HEAD_LIST} ${SRC_LIST})
+#ADD_LIBRARY(CommonStatic STATIC ${HEAD_LIST} ${SRC_LIST})
+#ADD_LIBRARY(CommonShared SHARED ${HEAD_LIST} ${SRC_LIST})
+#SET_TARGET_PROPERTIES(CommonStatic PROPERTIES OUTPUT_NAME Common)
+#SET_TARGET_PROPERTIES(CommonShared PROPERTIES OUTPUT_NAME Common)
+

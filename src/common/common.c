@@ -14,17 +14,55 @@ int tcp_socket_create(int blocked) {
 	return fd;
 }
 
-int tcp_socket_connect(char *ip, uint16_t port) {
+int tcp_socket_connect_with_ip(uint32_t ip, uint16_t port) {
 	
 	struct sockaddr_in addr;
 	int ret = 0;
 	int fd = tcp_socket_create(0);
+
+    bzero(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = ip;
+    addr.sin_port = htons(port);
+
 	if((ret = connect(fd, &addr, sizeof(addr))) != 0) {
 
 	}
 	return fd;
 }
 
+int tcp_socket_connect_with_domain(char *domin, uint16_t port) {
+	
+	struct sockaddr_in addr;
+	int ret = 0;
+	int fd = -1;
+	struct addrinfo *first, *iter, hints;
+
+    memset(&hints, 0, sizeof(hints));
+
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = 0;
+    hints.ai_flags = 0;
+
+    getaddrinfo(domin, NULL, &hints, &first);
+    if(first == NULL) {
+    	return 0;
+    }
+
+	fd = tcp_socket_create(0);
+    for (iter = first; iter->ai_next != NULL; iter = iter->ai_next) {
+    	memcpy(&addr, iter->ai_addr, iter->ai_addrlen);
+    	addr.sin_port = htons(port);
+		
+		if((ret = connect(fd, &addr, sizeof(addr))) != 0) {
+			break;
+		}
+    }
+    freeaddrinfo(first);
+
+	return fd;
+}
 
 int tcp_socket_bind(int sockfd, char *host, uint16_t port) {
 	
@@ -94,19 +132,28 @@ int set_socket_blocked(int sockfd) {
 
 int recv_to_ringbuffer(int sockfd, struct ringbuffer *rb) {
 
-	int n = 0;
+	int nread = 0;
 	int count = 0;
-	char buf[RECV_BUFFER_SIZE];
 	int skip = 0;
+	int nmaxread = ringbuffer_can_wrtie(rb);
+	int nneedread = 0;
+	char buf[RECV_BUFFER_SIZE];
 
 	while(!skip) {
-		n = recv(session->srcfd, buf, RECV_BUFFER_SIZE, 0);
-		if(n > 0) {
-			count += n;
-			ringbuffer_write(session->dstbuf, buf, n);
+
+		int nneedread = nmaxread > RECV_BUFFER_SIZE ? RECV_BUFFER_SIZE : nmaxread;
+
+		nread = recv(session->srcfd, buf, nneedread, 0);
+		if(nread > 0) {
+			count += nread;
+			nmaxread -= n;
+			n = ringbuffer_write(session->dstbuf, buf, n);
+			if(nmaxread == 0) {
+				break;
+			}
 		} else {
-			count = n;
-			skip = (n <= 0);
+			count = nread;
+			skip = (nread <= 0);
 		}
 	}
 

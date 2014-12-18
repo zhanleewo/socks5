@@ -80,6 +80,7 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
 	char rsv = 0x00;
 	char atyp = 0x00;
 	char ndstaddr = 0x00;
+	uint32_t ip = 0x00;
 	char dstaddr[256] = {0x00};
 	uint16_t dstport = 0;
 
@@ -108,76 +109,79 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
         return nread;
     }
 
-    nread = ringbuffer_transaction_read(rb, &ndstaddr, 1);
+    nread = ringbuffer_transaction_read(rb, &atyp, 1);
     if(nread <= 0) {
         ringbuffer_transaction_rollback(session->srcbuf, &tran);
         return nread;
     }
 
-    nread = ringbuffer_transaction_read(rb, dstaddr, (int) ndstaddr);
-    if(nread <= 0) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
+
+    switch(atyp) {
+    case 0x01:	// ipv4
+    	nread = ringbuffer_transaction_read(rb, &ip, 4);
+    	if(nread <= 0) {
+    		ringbuffer_transaction_rollback(session->srcbuf, &tran);
+        	return nread;
+		}
+
+		nread = ringbuffer_transaction_read(rb, &dstport, 2);
+		if(nread <= 0) {
+			ringbuffer_transaction_rollback(session->srcbuf, &tran);
+			return nread;
+		}
+    	session->dstfd = tcp_socket_connect_with_ip(ip, dstport);
+    	break;
+    case 0x03:	// domain
+		nread = ringbuffer_transaction_read(rb, &ndstaddr, 1);
+		if(nread <= 0) {
+			ringbuffer_transaction_rollback(session->srcbuf, &tran);
+			return nread;
+		}
+
+		nread = ringbuffer_transaction_read(rb, dstaddr, ndstaddr);
+		if(nread <= 0) {
+			ringbuffer_transaction_rollback(session->srcbuf, &tran);
+			return nread;
+		}
+
+		nread = ringbuffer_transaction_read(rb, &dstport, 2);
+		if(nread <= 0) {
+			ringbuffer_transaction_rollback(session->srcbuf, &tran);
+			return nread;
+		}
+    	session->dstfd = tcp_socket_connect_with_ip(dstaddr, dstport);
+    	break;
+    case 0x04:	// ipv6
+    	break;
     }
 
-    nread = ringbuffer_transaction_read(rb, &dstport, 2);
-    if(nread <= 0) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
-    }
-
-    session->dstfd = tcp_socket_connect(dstaddr, dstport);
     if(session->dstfd < 0) {
-    	rep = session->dstfd;
+    	/*
+    	rep = 0;
+		0x00        成功
+		0x01        一般性失败
+		0x02        规则不允许转发
+		0x03        网络不可达
+		0x04        主机不可达
+		0x05        连接拒绝
+		0x06        TTL超时
+		0x07        不支持请求包中的CMD
+		0x08        不支持请求包中的ATYP
+		0x09-0xFF   unassigned
+		*/
     }
 
-    ringbuffer_clear(rb);
-    ringbuffer_write(rb, &ver, 1);
-    ringbuffer_write(rb, &rep, 1);
-    ringbuffer_write(rb, &rsv, 1);
-    ringbuffer_write(rb, &atyp, 1);
-    ringbuffer_write(rb, &nbndaddr, 1);
-    ringbuffer_write(rb, bndaddr, nbndaddr);
-    ringbuffer_write(rb, &bndport, 2);
+	ringbuffer_clear(rb);
+	ringbuffer_write(rb, &ver, 1);
+	ringbuffer_write(rb, &rep, 1);
+	ringbuffer_write(rb, &rsv, 1);
+	ringbuffer_write(rb, &atyp, 1);
+	ringbuffer_write(rb, &nbndaddr, 1);
+	ringbuffer_write(rb, bndaddr, nbndaddr);
+	ringbuffer_write(rb, &bndport, 2);
 
 	ret = socks5_src_do_transmit(handle, session);
 
-	return ret;
-}
-
-static int socks5_src_do_transmit(struct sserver_handle *handle, struct ssession *session) {
-	int ret = 0;
-	FD_SET(session->dstfd, &handle->writefds);
-	return ret;
-}
-
-static int socks5_on_src_send(struct sserver_handle *handle, struct ssession *session) {
-	int ret = 0;
-
-	struct ringbuffer_tran tran;
-    char buf[4096];
-    int nread = 0;
-    int nsent = 0;
-
-    struct ringbuffer *rb = ringbuffer_transaction_begin(session->srcbuf, &tran);
-    
-    nread = ringbuffer_transaction_read(rb, buf, 4096);
-    if(nread < 0) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
-    }
-
-	nsent = send(session->srcfd, buf, nread);
-
-	if(!ringbuffer_can_read(session->srcbuf)) {
-		FD_CLR(session->srcfd, &handle->session->writefds);
-	}
-	return nsent;
-}
-
-static int socks5_dst_do_transmit(struct sserver_handle *handle, struct ssession *session) {
-	int ret = 0;
-	FD_SET(session->srcfd, &handle->writefds);
 	return ret;
 }
 
@@ -195,50 +199,71 @@ static int socks5_on_src_recv(struct sserver_handle *handle, struct ssession *se
 		socks5_src_do_connect(handle, session);
 		break;
 	case SSESSION_STATE_TRANSMIT:
-		socks5_src_do_transmit(handle, session);
+		FD_SET(session->srcfd, &handle->writefds);
 		break;
 	}
 	return ret;
 }
 
-static int socks5_on_dst_send(struct sserver_handle *handle, struct ssession *session) {
+static int socks5_on_dst_recv(struct sserver_handle *handle, struct ssession *session) {
+	int ret = 0;
+	FD_SET(session->srcfd, &handle->writefds);
+	return ret;
+}
+
+static int socks5_on_send(struct sserver_handle *handle, struct ssession *session, int iotype) {
 	
 	struct ringbuffer_tran tran;
     char buf[4096];
     int nread = 0;
     int nsent = 0;
+    int nleft = 0;
+    int count = 0;
+    int fd = -1;
+    struct ringbuffer *orgrb = NULL;
+    struct ringbuffer *tranrb = NULL; 
 
-    struct ringbuffer *rb = ringbuffer_transaction_begin(session->dstbuf, &tran);
+    tranrb = ringbuffer_transaction_begin(session->srcbuf, &tran);
     
-    nread = ringbuffer_transaction_read(rb, buf, 4096);
-    if(nread < 0) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
-    }
-	nsent = send(session->dstfd, buf, nread);
-	if(!ringbuffer_can_read(session->dstbuf)) {
-		FD_CLR(session->dstfd, &handle->session->writefds);
-	}
-	return nsent;
-}
-
-static int socks5_on_dst_recv(struct sserver_handle *handle, struct ssession *session) {
-	int ret = 0;
-	ret = socks5_dst_do_transmit(handle, session);
-	return ret;
-}
-
-static int socks5_on_send(struct sserver_handle *handle, struct ssession *session, int iotype) {
-	int ret = 0;
 	switch(iotype) {
 	case SSESSION_IO_TYPE_SRC:
-		ret = socks5_on_src_send(handle, session);
+		orgrb = session->srcbuf;
+		fd = session->srcfd;
 		break;
 	case SSESSION_IO_TYPE_DST:
-		ret = socks5_on_dst_send(handle, session);
+		orgrb = session->dstbuf;
+		fd = session->dstfd;
 		break;
 	}
-	return ret;
+
+    while(nleft == 0) {
+		if(ringbuffer_can_read(tranrb)) {
+
+    		nread = ringbuffer_transaction_read(tranrb, buf, 4096);
+    		if(nread < 0) {
+       		 	ringbuffer_transaction_rollback(session->srcbuf, &tran);
+        		return nread;
+    		}
+
+			nsent = send(fd, buf, nread);
+			if(nsent <= 0) {
+       		 	ringbuffer_transaction_rollback(session->srcbuf, &tran);
+        		return nsent;
+			}
+
+			count += nsent;
+			nleft = nread - nsent;
+		} else {
+			FD_CLR(fd, &handle->session->writefds);
+			nleft = 0;
+			break;
+		}
+	}
+	
+	ringbuffer_tran_set_left(&tran, nleft);
+	ringbuffer_transaction_commit(session->srcbuf, &tran);
+
+	return count;
 }
 
 static int socks5_on_recv(struct sserver_handle *handle, struct ssession *session, int iotype) {

@@ -21,6 +21,9 @@ struct ringbuffer{
     char *data;
 };
 
+void ringbuffer_tran_set_left(struct ringbuffer_tran *tran, int n) {
+    tran->nleft = n;
+}
 
 struct ringbuffer* ringbuffer_new(int32_t capacity) {
     
@@ -122,23 +125,42 @@ ssize_t ringbuffer_transaction_read(struct ringbuffer *rb, void *data, size_t co
 
 
 struct ringbuffer *ringbuffer_transaction_begin(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
-    memcpy(tran, rb, sizeof(*rb));
-    return (struct ringbuffer *) tran;
+    memcpy(&tran->rb, rb, sizeof(*rb));
+    return &tran->rb;
 }
 
 int ringbuffer_transaction_rollback(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
     
 //    struct ringbuffer *trb = (struct ringbuffer *)tran;
 //    trb->head = rb->head;
-    memcpy(tran, rb, sizeof(*rb));
+    memcpy(&tran->rb, rb, sizeof(*rb));
     return 0;
 }
 
-int ringbuffer_transaction_commit(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
+/*int ringbuffer_transaction_commit(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
     memcpy(rb, tran, sizeof(*rb));
     return 0;
-}
+}*/
+int ringbuffer_transaction_commit(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
+    
+    if(tran->nleft > 0) {
+        if(tran->rb.head <= tran->rb.tail) {
+            if(tran->rb.head - tran->nleft >= tran->data) {
+                tran->rb.head -= tran->nleft;
+            } else {
+                // tran->rb.head = tran->rb.data + (ringbuffer_capacity(tran->rb) - (tran->nleft - (tran->head - tran->data)))
+                tran->rb.head = tran->rb.data + (ringbuffer_capacity(tran->rb) - tran->nleft + tran->head - tran->data);
+            }
+        } else {
+            if(tran->rb.head - tran->nleft >= tran->tail) {
+                tran->rb.head -= tran->nleft;
+            }
+        }
+    }
 
+    memcpy(rb, &tran->rb, sizeof(*rb));
+    return 0;
+}
 
 
 ssize_t ringbuffer_read(struct ringbuffer *rb, void *data, size_t count) {

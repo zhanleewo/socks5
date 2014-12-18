@@ -263,6 +263,8 @@ static int sserver_start(struct sserver *server) {
 	ret = tcp_socket_listen(server->fd, server->config->backlog);
 	if(ret < 0)
 		return ret;
+
+	ret = sserver_select(server);
 	return ret;
 }
 
@@ -329,6 +331,9 @@ struct sserver *sserver_new(struct sserver_config *config) {
 void sserver_release(struct sserver *server) {
 
 	if(sserver) {
+		if(server->handle) {
+			free(server->handle);
+		}
 		free(server);
 	}
 }

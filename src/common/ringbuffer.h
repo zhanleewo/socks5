@@ -14,8 +14,12 @@
 struct ringbuffer;
 
 struct ringbuffer_tran {
-    char buf[8];
+    struct ringbuffer rb;
+    int nleft;
 };
+
+void ringbuffer_tran_set_left(struct ringbuffer_tran *tran, int n);
+
 
 struct ringbuffer* ringbuffer_new(int32_t capacity);
 void ringbuffer_free(struct ringbuffer *rb);
@@ -32,6 +36,5 @@ ssize_t ringbuffer_transaction_read(struct ringbuffer *rb, void *data, size_t co
 struct ringbuffer *ringbuffer_transaction_begin(struct ringbuffer *rb, struct ringbuffer_tran *tran);
 int ringbuffer_transaction_rollback(struct ringbuffer *rb, struct ringbuffer_tran *tran);
 int ringbuffer_transaction_commit(struct ringbuffer *rb, struct ringbuffer_tran *tran);
-
 
 #endif

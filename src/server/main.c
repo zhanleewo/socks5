@@ -1,54 +1,19 @@
 #include <common.h>
 #include <stdio.h>
-#include <ringbuffer.h>
+#include <server.h>
 
 int main(int argc, char **argv) {
     
-    struct ringbuffer *rb = ringbuffer_new(1024 * 1024);
-    struct ringbuffer_tran tran;
-    char buf[10];
-    ringbuffer_write(rb, "hello", 5);
+    char *host = "0.0.0.0";
+    uint16_t *port = 1080;
+    int backlog = 10;
+
+    struct sserver_config *config = sserver_config_new(host, port, backlog);
+    struct sserver *server = sserver_new(config);
     
-    struct ringbuffer *transacted_rb = ringbuffer_transaction_begin(rb, &tran);
-    
-    int ret = ringbuffer_transaction_read(transacted_rb, buf, 5);
-    if(ret < 0) {
-        ringbuffer_transaction_rollback(rb, &tran);
-    }
-    
-    ret = ringbuffer_transaction_read(transacted_rb, buf, 5);
-    if(ret < 0) {
-        ringbuffer_transaction_rollback(rb, &tran);
-    }
-    
-    ringbuffer_write(rb, "world", 5);
-    transacted_rb = ringbuffer_transaction_begin(rb, &tran);
-    ret = ringbuffer_transaction_read(transacted_rb, buf, 5);
-    if(ret < 0) {
-        ringbuffer_transaction_rollback(rb, &tran);
-    }
-    
-    ret = ringbuffer_transaction_read(transacted_rb, buf, 5);
-    if(ret < 0) {
-        ringbuffer_transaction_rollback(rb, &tran);
-    } else {
-        ringbuffer_transaction_commit(rb, &tran);
-    }
-    
-    ringbuffer_write(rb, "javac", 5);
-    ringbuffer_write(rb, "javax", 5);
-    
-    transacted_rb = ringbuffer_transaction_begin(rb, &tran);
-    ret = ringbuffer_transaction_read(transacted_rb, buf, 5);
-    if(ret < 0) {
-        ringbuffer_transaction_rollback(rb, &tran);
-    }
-    
-    ret = ringbuffer_transaction_read(transacted_rb, buf, 5);
-    if(ret < 0) {
-        ringbuffer_transaction_rollback(rb, &tran);
-    }
-    
-	printf("hello world!\n");
+    server->start();
+
+    server->stop();
+        
 	return 0;
 }

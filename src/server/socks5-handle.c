@@ -14,35 +14,35 @@ static int socks5_src_choose_auth_method(struct sserver_handle *handle, struct s
 
 	struct ringbuffer *rb = session->dstbuf;
 
-    nread = ringbuffer_transaction_read(rb, &ver, 1);
-    if(nread <= 0) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
-    }
+	nread = ringbuffer_transaction_read(rb, &ver, 1);
+	if(nread <= 0) {
+		ringbuffer_transaction_rollback(session->srcbuf, &tran);
+		return nread;
+	}
 
-    if(ver != 0x5) {
-    	return -1;
-    }
+	if(ver != 0x5) {
+		return -1;
+	}
     
-    nread = ringbuffer_transaction_read(rb, &nmethod, 1);
-    if(nread <= 0) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
-    }
+	nread = ringbuffer_transaction_read(rb, &nmethod, 1);
+	if(nread <= 0) {
+		ringbuffer_transaction_rollback(session->srcbuf, &tran);
+		return nread;
+	}
 
-    if(nmethod == 0) {
-    	return -2;
-    }
+	if(nmethod == 0) {
+		return -2;
+	}
 	
 	nread = ringbuffer_transaction_read(rb, &nmethod, (int) nmethod);
-    if(nread <= 0 && nread != (int) nmethod) {
-        ringbuffer_transaction_rollback(session->srcbuf, &tran);
-        return nread;
-    }
+	if(nread <= 0 && nread != (int) nmethod) {
+		ringbuffer_transaction_rollback(session->srcbuf, &tran);
+		return nread;
+	}
 
-    ringbuffer_clear(rb);
-    ringbuffer_write(rb, &ver, 1);
-    ringbuffer_write(rb, &selmethod, 1);
+	ringbuffer_clear(rb);
+	ringbuffer_write(rb, &ver, 1);
+	ringbuffer_write(rb, &selmethod, 1);
 
 	ret = socks5_src_do_transmit(handle, session);
 	

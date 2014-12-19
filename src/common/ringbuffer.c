@@ -14,13 +14,6 @@
 
 #define min(a, b) (a)<(b)?(a):(b)
 
-struct ringbuffer{
-    int32_t capacity;
-    char *head;
-    char *tail;
-    char *data;
-};
-
 void ringbuffer_tran_set_left(struct ringbuffer_tran *tran, int n) {
     tran->nleft = n;
 }
@@ -28,10 +21,10 @@ void ringbuffer_tran_set_left(struct ringbuffer_tran *tran, int n) {
 struct ringbuffer* ringbuffer_new(int32_t capacity) {
     
     struct ringbuffer *rb = NULL;
-
-    if(capacity <= 0) 
+    
+    if(capacity <= 0)
         capacity = RING_BUFFER_DEFAULT_SIZE;
-
+    
     rb = malloc(sizeof(*rb) + capacity);
     if (!rb)
         return NULL;
@@ -56,7 +49,7 @@ void ringbuffer_clear(struct ringbuffer *rb) {
 }
 
 ssize_t ringbuffer_capacity(struct ringbuffer *rb) {
-
+    
     if(!rb)
         return -1;
     
@@ -131,40 +124,40 @@ struct ringbuffer *ringbuffer_transaction_begin(struct ringbuffer *rb, struct ri
 
 int ringbuffer_transaction_rollback(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
     
-//    struct ringbuffer *trb = (struct ringbuffer *)tran;
-//    trb->head = rb->head;
+    //    struct ringbuffer *trb = (struct ringbuffer *)tran;
+    //    trb->head = rb->head;
     memcpy(&tran->rb, rb, sizeof(*rb));
     return 0;
 }
 
 /*int ringbuffer_transaction_commit(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
-    memcpy(rb, tran, sizeof(*rb));
-    return 0;
-}*/
+ memcpy(rb, tran, sizeof(*rb));
+ return 0;
+ }*/
 int ringbuffer_transaction_commit(struct ringbuffer *rb, struct ringbuffer_tran *tran) {
     
     if(tran->nleft > 0) {
         if(tran->rb.head <= tran->rb.tail) {
-            if(tran->rb.head - tran->nleft >= tran->data) {
+            if(tran->rb.head - tran->nleft >= tran->rb.data) {
                 tran->rb.head -= tran->nleft;
             } else {
                 // tran->rb.head = tran->rb.data + (ringbuffer_capacity(tran->rb) - (tran->nleft - (tran->head - tran->data)))
-                tran->rb.head = tran->rb.data + (ringbuffer_capacity(tran->rb) - tran->nleft + tran->head - tran->data);
+                tran->rb.head = tran->rb.data + (ringbuffer_capacity(&tran->rb) - (tran->nleft - (tran->rb.head - tran->rb.data)));
             }
         } else {
-            if(tran->rb.head - tran->nleft >= tran->tail) {
+            if(tran->rb.head - tran->nleft >= tran->rb.tail) {
                 tran->rb.head -= tran->nleft;
             }
         }
     }
-
+    
     memcpy(rb, &tran->rb, sizeof(*rb));
     return 0;
 }
 
 
 ssize_t ringbuffer_read(struct ringbuffer *rb, void *data, size_t count) {
-
+    
     int nread = 0;
     
     if(!rb || !data)

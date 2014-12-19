@@ -10,8 +10,15 @@
 
 #include <stdlib.h>
 #include <stdint.h>
- 
-struct ringbuffer;
+
+// struct ringbuffer;
+
+struct ringbuffer{
+    int32_t capacity;
+    char *head;
+    char *tail;
+    char *data;
+};
 
 struct ringbuffer_tran {
     struct ringbuffer rb;

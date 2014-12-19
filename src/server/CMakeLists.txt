@@ -4,10 +4,14 @@ SET(HEAD_LIST
 	../common/list.h
 	../common/common.h
 	../common/ringbuffer.h
-	../common/threadpool.h)
+	../common/threadpool.h
+	server.h
+	socks5-handle.h)
 
 SET(SRC_LIST
-	main.c)
+	main.c server.c 
+	socks5-handle.c)
+
 MESSAGE(STATUS ${CMAKE_BINARY_DIR})
 MESSAGE(STATUS ${PROJECT_BINARY_DIR})
 INCLUDE_DIRECTORIES(../common .)

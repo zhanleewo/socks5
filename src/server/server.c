@@ -84,6 +84,8 @@ static int sserver_transmit_error(struct sserver *server, struct ssession *sessi
     
     if(err == 0) {
         printf("%s - %s <%d> : peer closed\n", __FILE__, __FUNCTION__, __LINE__);
+    } else {
+        printf("%s - %s <%d> : %s\n", __FILE__, __FUNCTION__, __LINE__, strerror(err));
     }
     
     if(session->srcfd > 0) {
@@ -125,10 +127,6 @@ static int sserver_io_read_event(struct sserver *server, fd_set *readfds, struct
             break;
     }
     
-    if(fd < 0) {
-        return bcontinue;
-    }
-    
     if(FD_ISSET(fd, readfds)) {
         n = recv_to_ringbuffer(fd, rb);
         if(n > 0) {
@@ -136,11 +134,13 @@ static int sserver_io_read_event(struct sserver *server, fd_set *readfds, struct
             if(n != SE_NEEDMORE && n != 0) {
                 bcontinue = 1;
             }
-        } else if(n == EINTR || n == EAGAIN) {
-            
         } else {
-            sserver_recv_error(server, session, n);
-            bcontinue = 1;
+            if((errno == EINTR || errno == EAGAIN)) {
+            
+            } else {
+                sserver_recv_error(server, session, n == 0 ? 0 : errno);
+                bcontinue = 1;
+            }
         }
     }
     
@@ -164,16 +164,12 @@ static int sserver_io_write_event(struct sserver *server, fd_set *writefds, stru
             break;
     }
     
-    if(fd < 0) {
-        return bcontinue;
-    }
-    
     if(FD_ISSET(fd, writefds)) {
         n = server->handle->on_send(server->handle, session, iotype);
         if(n > 0) {
-        } else if(n == EINTR || n == EAGAIN) {
+        } else if(errno == EINTR || errno == EAGAIN) {
         } else {
-            sserver_send_error(server, session, n);
+            sserver_send_error(server, session, n == 0 ? 0 : errno);
             bcontinue = 1;
         }
     }
@@ -195,29 +191,57 @@ static int sserver_select_event(struct sserver *server, fd_set *readfds, fd_set 
             break;
         }
         
-        if((bcontinue = sserver_io_read_event(server, readfds, session, SSESSION_IO_TYPE_SRC))) {
+        if(session->srcfd > 0 && (bcontinue = sserver_io_read_event(server, readfds, session, SSESSION_IO_TYPE_SRC))) {
+            
+            FD_CLR(session->srcfd, &server->readfds);
+            FD_CLR(session->srcfd, &server->writefds);
+            
+            FD_CLR(session->dstfd, &server->readfds);
+            FD_CLR(session->dstfd, &server->writefds);
+            
             list_del(entry);
             sserver_session_release(session);
             continue;
         }
         
-        if((bcontinue = sserver_io_write_event(server, writefds, session, SSESSION_IO_TYPE_SRC))) {
+        if(session->srcfd > 0 && (bcontinue = sserver_io_write_event(server, writefds, session, SSESSION_IO_TYPE_SRC))) {
+            
+            FD_CLR(session->srcfd, &server->readfds);
+            FD_CLR(session->srcfd, &server->writefds);
+            
+            FD_CLR(session->dstfd, &server->readfds);
+            FD_CLR(session->dstfd, &server->writefds);
+            
             list_del(entry);
             sserver_session_release(session);
             continue;
         }
         
-        /*if((bcontinue = sserver_io_read_event(server, writefds, session, SSESSION_IO_TYPE_DST))) {
-         list_del(entry);
-         sserver_session_release(session);
-         continue;
-         }
-         
-         if((bcontinue = sserver_io_write_event(server, readfds, session, SSESSION_IO_TYPE_DST))) {
-         list_del(entry);
-         sserver_session_release(session);
-         continue;
-         }*/
+        if(session->dstfd > 0 && (bcontinue = sserver_io_read_event(server, readfds, session, SSESSION_IO_TYPE_DST))) {
+            
+            FD_CLR(session->srcfd, &server->readfds);
+            FD_CLR(session->srcfd, &server->writefds);
+            
+            FD_CLR(session->dstfd, &server->readfds);
+            FD_CLR(session->dstfd, &server->writefds);
+            
+            list_del(entry);
+            sserver_session_release(session);
+            continue;
+        }
+        
+        if(session->dstfd > 0 && (bcontinue = sserver_io_write_event(server, writefds, session, SSESSION_IO_TYPE_DST))) {
+            
+            FD_CLR(session->srcfd, &server->readfds);
+            FD_CLR(session->srcfd, &server->writefds);
+            
+            FD_CLR(session->dstfd, &server->readfds);
+            FD_CLR(session->dstfd, &server->writefds);
+            
+            list_del(entry);
+            sserver_session_release(session);
+            continue;
+        }
         
     }
     

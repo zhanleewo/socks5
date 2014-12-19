@@ -17,25 +17,33 @@ int tcp_socket_create(int blocked) {
 int tcp_socket_connect_with_ip(uint32_t ip, uint16_t port) {
     
     struct sockaddr_in addr;
-    int ret = 0;
-    int fd = tcp_socket_create(0);
+    int fd = -1;
+    int ret = -1;
     
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = ip;
-    addr.sin_port = htons(port);
+    addr.sin_port = port;
+    addr.sin_len = sizeof(addr);
+    fd = tcp_socket_create(1);
+    if(fd < 0) {
+        return fd;
+    }
     
     if((ret = connect(fd, (struct sockaddr *) &addr, sizeof(addr))) != 0) {
-        
+        return ret;
     }
+    set_socket_nonblock(fd);
+    
     return fd;
 }
 
 int tcp_socket_connect_with_domain(char *domin, uint16_t port) {
     
     struct sockaddr_in addr;
-    int ret = 0;
+    int ret = -1;
     int fd = -1;
+    
     struct addrinfo *first, *iter, hints;
     
     memset(&hints, 0, sizeof(hints));
@@ -50,16 +58,28 @@ int tcp_socket_connect_with_domain(char *domin, uint16_t port) {
         return 0;
     }
     
-    fd = tcp_socket_create(0);
+    fd = tcp_socket_create(1);
+    if(fd < 0) {
+        return fd;
+    }
+    
     for (iter = first; iter->ai_next != NULL; iter = iter->ai_next) {
         memcpy(&addr, iter->ai_addr, iter->ai_addrlen);
-        addr.sin_port = htons(port);
+        addr.sin_port = port;
         
-        if((ret = connect(fd, (struct sockaddr *) &addr, sizeof(addr))) != 0) {
+        if((ret = connect(fd, (struct sockaddr *) &addr, sizeof(addr))) == 0) {
             break;
         }
     }
     freeaddrinfo(first);
+    
+    if(ret != 0) {
+        return ret;
+    }
+    
+    if(ret == 0 && fd > 0) {
+        set_socket_nonblock(fd);
+    }
     
     return fd;
 }
@@ -139,7 +159,6 @@ int recv_to_ringbuffer(int sockfd, struct ringbuffer *rb) {
     int count = 0;
     int skip = 0;
     int nmaxread = ringbuffer_can_write(rb);
-    int nneedread = 0;
     char buf[RECV_BUFFER_SIZE];
     
     while(!skip) {

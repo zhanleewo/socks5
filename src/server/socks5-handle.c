@@ -1,3 +1,4 @@
+
 #include <socks5-handle.h>
 
 static int socks5_src_choose_auth_method(struct sserver_handle *handle, struct ssession *session) {
@@ -79,6 +80,20 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
     // 6. add fd to writefds
     // 7. set session state to SSESSION_STATE_TRANSMIT
     
+    /*
+     rep:
+     0x00        成功
+     0x01        一般性失败
+     0x02        规则不允许转发
+     0x03        网络不可达
+     0x04        主机不可达
+     0x05        连接拒绝
+     0x06        TTL超时
+     0x07        不支持请求包中的CMD
+     0x08        不支持请求包中的ATYP
+     0x09-0xFF   unassigned
+     */
+    
     int ret = 0;
     char ver = 0x00;
     char cmd = 0x00;
@@ -124,6 +139,16 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
         return SE_NEEDMORE;
     }
     
+    switch (cmd) {
+        case 0x01:
+            break;
+        case 0x02:
+        case 0x03:
+        default:
+            rep = 0x07;
+            goto pre_send;
+            break;
+    }
     
     switch(atyp) {
         case 0x01:	// ipv4
@@ -132,15 +157,12 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
                 ringbuffer_transaction_rollback(session->dstbuf, &tran);
                 return SE_NEEDMORE;
             }
-            
             nread = ringbuffer_transaction_read(tranrb, &dstport, 2);
             if(nread <= 0) {
                 ringbuffer_transaction_rollback(session->dstbuf, &tran);
                 return SE_NEEDMORE;
             }
             session->dstfd = tcp_socket_connect_with_ip(ip, dstport);
-            printf("connect to : %d\n", ip);
-            
             break;
         case 0x03:	// domain
             nread = ringbuffer_transaction_read(tranrb, &ndstaddr, 1);
@@ -161,27 +183,41 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
                 return SE_NEEDMORE;
             }
             session->dstfd = tcp_socket_connect_with_domain(dstaddr, dstport);
-            printf("connect to : %s\n", dstaddr);
             break;
         case 0x04:	// ipv6
+            rep = 0x08;
+            goto pre_send;
             break;
     }
     
     if(session->dstfd < 0) {
-        /*
-         rep = 0;
-         0x00        成功
-         0x01        一般性失败
-         0x02        规则不允许转发
-         0x03        网络不可达
-         0x04        主机不可达
-         0x05        连接拒绝
-         0x06        TTL超时
-         0x07        不支持请求包中的CMD
-         0x08        不支持请求包中的ATYP
-         0x09-0xFF   unassigned
-         */
+        switch (errno) {
+            case ENETUNREACH:
+                rep = 0x03;
+                break;
+            case EHOSTUNREACH:
+                rep = 0x04;
+                break;
+            case ECONNREFUSED:
+                rep = 0x05;
+                break;
+            default:
+                rep = 0x01;
+                break;
+        }
+    } else {
+        FD_SET(session->dstfd, &handle->server->readfds);
+        if(handle->server->maxfd < session->dstfd)
+            handle->server->maxfd = session->dstfd;
     }
+
+pre_send:
+    atyp = 0x01;
+    nbndaddr = 4;
+    bndaddr[0] = '\0';
+    bndaddr[1] = '\0';
+    bndaddr[2] = '\0';
+    bndaddr[3] = '\0';
     
     ringbuffer_clear(session->dstbuf);
     ringbuffer_write(session->srcbuf, &ver, 1);
@@ -193,7 +229,10 @@ static int socks5_src_do_connect(struct sserver_handle *handle, struct ssession 
     ringbuffer_write(session->srcbuf, &bndport, 2);
     
     FD_SET(session->srcfd, &handle->server->writefds);
+    if(handle->server->maxfd < session->srcfd)
+        handle->server->maxfd = session->srcfd;
     
+    session->state = SSESSION_STATE_TRANSMIT;
     return ret;
 }
 
@@ -211,7 +250,9 @@ static int socks5_on_src_recv(struct sserver_handle *handle, struct ssession *se
             socks5_src_do_connect(handle, session);
             break;
         case SSESSION_STATE_TRANSMIT:
-            FD_SET(session->srcfd, &handle->server->writefds);
+            FD_SET(session->dstfd, &handle->server->writefds);
+            if(handle->server->maxfd < session->dstfd)
+                handle->server->maxfd = session->dstfd;
             break;
     }
     return ret;
@@ -220,6 +261,8 @@ static int socks5_on_src_recv(struct sserver_handle *handle, struct ssession *se
 static int socks5_on_dst_recv(struct sserver_handle *handle, struct ssession *session) {
     int ret = 0;
     FD_SET(session->srcfd, &handle->server->writefds);
+    if(handle->server->maxfd < session->srcfd)
+        handle->server->maxfd = session->srcfd;
     return ret;
 }
 
@@ -235,7 +278,6 @@ static int socks5_on_send(struct sserver_handle *handle, struct ssession *sessio
     struct ringbuffer *orgrb = NULL;
     struct ringbuffer *tranrb = NULL;
     
-    tranrb = ringbuffer_transaction_begin(session->srcbuf, &tran);
     
     switch(iotype) {
         case SSESSION_IO_TYPE_SRC:
@@ -247,19 +289,20 @@ static int socks5_on_send(struct sserver_handle *handle, struct ssession *sessio
             fd = session->dstfd;
             break;
     }
+    tranrb = ringbuffer_transaction_begin(orgrb, &tran);
     
     while(nleft == 0) {
         if(ringbuffer_can_read(tranrb)) {
             
             nread = ringbuffer_transaction_read(tranrb, buf, 4096);
             if(nread < 0) {
-                ringbuffer_transaction_rollback(session->srcbuf, &tran);
+                ringbuffer_transaction_rollback(orgrb, &tran);
                 return nread;
             }
             
             nsent = send(fd, buf, nread, 0);
             if(nsent <= 0) {
-                ringbuffer_transaction_rollback(session->srcbuf, &tran);
+                ringbuffer_transaction_rollback(orgrb, &tran);
                 return nsent;
             }
             
@@ -273,7 +316,7 @@ static int socks5_on_send(struct sserver_handle *handle, struct ssession *sessio
     }
     
     ringbuffer_tran_set_left(&tran, nleft);
-    ringbuffer_transaction_commit(session->srcbuf, &tran);
+    ringbuffer_transaction_commit(orgrb, &tran);
     
     return count;
 }
